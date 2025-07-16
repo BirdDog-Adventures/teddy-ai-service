@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  teddy-api:
+    build: .
+    container_name: teddy-ai-service
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/birddog_db
+      - VECTOR_DB_URL=postgresql://postgres:postgres@postgres:5432/birddog_vectors
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./:/app
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - teddy-network
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: teddy-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=birddog_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+    networks:
+      - teddy-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: teddy-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - teddy-network
+
+  celery-worker:
+    build: .
+    container_name: teddy-celery-worker
+    command: celery -A services.celery_app worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/birddog_db
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./:/app
+    networks:
+      - teddy-network
+
+  celery-beat:
+    build: .
+    container_name: teddy-celery-beat
+    command: celery -A services.celery_app beat --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/birddog_db
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./:/app
+    networks:
+      - teddy-network
+
+  flower:
+    build: .
+    container_name: teddy-flower
+    command: celery -A services.celery_app flower
+    ports:
+      - "5555:5555"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/birddog_db
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+      - celery-worker
+    volumes:
+      - ./:/app
+    networks:
+      - teddy-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  teddy-network:
+    driver: bridge

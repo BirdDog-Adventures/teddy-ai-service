@@ -1,0 +1,81 @@
+# Core Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+gunicorn==21.2.0
+python-multipart==0.0.6
+
+# API Dependencies
+pydantic==2.5.3
+pydantic-settings==2.1.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-dotenv==1.0.0
+
+# Database
+sqlalchemy==2.0.25
+psycopg2-binary==2.9.9
+alembic==1.13.1
+asyncpg==0.29.0
+snowflake-connector-python==3.6.0
+snowflake-sqlalchemy==1.5.1
+
+# AI/ML
+openai==1.8.0
+langchain==0.1.0
+langchain-openai==0.0.2
+tiktoken==0.5.2
+numpy==1.26.3
+pandas==2.2.2
+scikit-learn==1.4.0
+sentence-transformers==2.2.2
+
+# Vector Database
+pgvector==0.2.4
+
+# Caching
+redis==5.0.1
+hiredis==2.3.2
+
+# HTTP Client
+httpx==0.26.0
+aiohttp==3.9.1
+
+# Task Queue
+celery==5.3.4
+flower==2.0.1
+
+# Monitoring
+prometheus-client==0.19.0
+opentelemetry-api==1.22.0
+opentelemetry-sdk==1.22.0
+opentelemetry-instrumentation-fastapi==0.43b0
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2023.3
+tenacity==8.2.3
+tqdm==4.66.1
+
+# Data Processing
+shapely==2.0.2
+geojson==3.1.0
+pyproj==3.6.1
+
+# Testing
+pytest==7.4.4
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+httpx-mock==0.4.0
+factory-boy==3.3.0
+
+# Development
+black==23.12.1
+flake8==7.0.0
+mypy==1.8.0
+pre-commit==3.6.0
+ipython==8.19.0
+
+# Documentation
+mkdocs==1.5.3
+mkdocs-material==9.5.3
