@@ -2,7 +2,7 @@
 Configuration settings for Teddy AI Service
 """
 from typing import List, Optional, Union
-from pydantic import AnyHttpUrl, field_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 import json
 
@@ -14,28 +14,65 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     
     # CORS
-    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
+    BACKEND_CORS_ORIGINS: List[str] = []
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
-    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
-        if isinstance(v, str) and not v.startswith("["):
-            return [i.strip() for i in v.split(",")]
-        elif isinstance(v, (list, str)):
+    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
+        if isinstance(v, str):
+            if v.startswith("[") and v.endswith("]"):
+                # Handle JSON array format
+                import json
+                try:
+                    return json.loads(v)
+                except json.JSONDecodeError:
+                    # If JSON parsing fails, fall back to comma-separated
+                    return [i.strip() for i in v.split(",")]
+            else:
+                # Handle comma-separated format
+                return [i.strip() for i in v.split(",") if i.strip()]
+        elif isinstance(v, list):
             return v
-        raise ValueError(v)
+        return []
 
     # Security
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ENABLE_AUTHENTICATION: bool = True  # Set to False for development/demo
 
-    # OpenAI Configuration
-    OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-4-turbo-preview"
-    EMBEDDING_MODEL: str = "text-embedding-3-small"
+    # LLM Configuration
+    LLM_PROVIDER: str = "openai"  # openai, anthropic, google, ollama, azure
+    LLM_MODEL: str = "gpt-3.5-turbo"
     MAX_TOKENS: int = 4000
     TEMPERATURE: float = 0.7
+    
+    # OpenAI Configuration
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_MODEL: str = "gpt-3.5-turbo"
+    OPENAI_BASE_URL: Optional[str] = None  # For custom endpoints
+    
+    # Anthropic Configuration
+    ANTHROPIC_API_KEY: Optional[str] = None
+    ANTHROPIC_MODEL: str = "claude-3-5-sonnet-20241022"
+    
+    # Google Configuration
+    GOOGLE_API_KEY: Optional[str] = None
+    GOOGLE_MODEL: str = "gemini-pro"
+    
+    # Azure OpenAI Configuration
+    AZURE_OPENAI_API_KEY: Optional[str] = None
+    AZURE_OPENAI_ENDPOINT: Optional[str] = None
+    AZURE_OPENAI_API_VERSION: str = "2024-02-15-preview"
+    AZURE_DEPLOYMENT_NAME: Optional[str] = None
+    
+    # Ollama Configuration (for local models)
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "llama2"
+    
+    # Embedding Configuration
+    EMBEDDING_PROVIDER: str = "openai"  # openai, sentence-transformers
+    EMBEDDING_MODEL: str = "text-embedding-3-small"
 
     # Database Configuration
     DATABASE_URL: str
@@ -53,7 +90,7 @@ class Settings(BaseSettings):
     SNOWFLAKE_ROLE: str = "DATAENGINEERINGADMIN"
 
     # Redis Configuration
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: Optional[str] = None
     REDIS_CACHE_TTL: int = 3600
 
     # External APIs

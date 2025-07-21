@@ -6,8 +6,10 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import uuid
 import logging
+import json
+from decimal import Decimal
 
-from api.core.dependencies import get_db, cache, rate_limiter
+from api.core.dependencies import get_db, cache, rate_limiter, get_optional_current_user
 from api.core.security import get_current_active_user
 from api.models import database as models
 from api.models import schemas
@@ -34,60 +36,87 @@ def get_embedding_service():
     return _embedding_service
 
 
+def _convert_decimals_to_float(obj):
+    """Recursively convert Decimal objects to float for JSON serialization"""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {key: _convert_decimals_to_float(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_decimals_to_float(item) for item in obj]
+    else:
+        return obj
+
+
 @router.post("/message", response_model=schemas.ChatResponse)
 async def send_message(
     request: schemas.ChatRequest,
-    current_user: models.User = Depends(get_current_active_user),
+    current_user = Depends(get_optional_current_user()),
     db: Session = Depends(get_db)
 ):
     """Send a message to the AI assistant"""
     try:
-        # Rate limiting
-        await rate_limiter(str(current_user.id))
+        from api.core.config import settings
         
-        # Get or create conversation
-        if request.conversation_id:
-            conversation = db.query(models.Conversation).filter(
-                models.Conversation.id == request.conversation_id,
-                models.Conversation.user_id == current_user.id
-            ).first()
-            
-            if not conversation:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Conversation not found"
+        # Rate limiting (skip in demo mode)
+        if settings.ENABLE_AUTHENTICATION:
+            await rate_limiter(str(current_user.id))
+        
+        # Handle conversation management based on authentication mode
+        conversation_id = None
+        conversation_history = []
+        
+        if settings.ENABLE_AUTHENTICATION:
+            # Full database-backed conversation management
+            if request.conversation_id:
+                conversation = db.query(models.Conversation).filter(
+                    models.Conversation.id == request.conversation_id,
+                    models.Conversation.user_id == current_user.id
+                ).first()
+                
+                if not conversation:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Conversation not found"
+                    )
+            else:
+                # Create new conversation
+                conversation = models.Conversation(
+                    user_id=current_user.id,
+                    conversation_type=request.conversation_type,
+                    property_id=request.property_id,
+                    meta_data=request.context or {}
                 )
-        else:
-            # Create new conversation
-            conversation = models.Conversation(
-                user_id=current_user.id,
-                conversation_type=request.conversation_type,
-                property_id=request.property_id,
+                db.add(conversation)
+                db.commit()
+                db.refresh(conversation)
+            
+            # Save user message
+            user_message = models.Message(
+                conversation_id=conversation.id,
+                role="user",
+                content=request.message,
                 meta_data=request.context or {}
             )
-            db.add(conversation)
-            db.commit()
-            db.refresh(conversation)
-        
-        # Save user message
-        user_message = models.Message(
-            conversation_id=conversation.id,
-            role="user",
-            content=request.message,
-            meta_data=request.context or {}
-        )
-        db.add(user_message)
-        
-        # Get conversation history
-        messages = db.query(models.Message).filter(
-            models.Message.conversation_id == conversation.id
-        ).order_by(models.Message.created_at).all()
-        
-        # Prepare context for LLM
-        conversation_history = [
-            {"role": msg.role, "content": msg.content}
-            for msg in messages
-        ]
+            db.add(user_message)
+            
+            # Get conversation history
+            messages = db.query(models.Message).filter(
+                models.Message.conversation_id == conversation.id
+            ).order_by(models.Message.created_at).all()
+            
+            # Prepare context for LLM
+            conversation_history = [
+                {"role": msg.role, "content": msg.content}
+                for msg in messages
+            ]
+            
+            conversation_id = str(conversation.id)
+        else:
+            # Demo mode - simple conversation without database persistence
+            conversation_id = request.conversation_id or "demo-conversation"
+            # In demo mode, we only have the current message
+            conversation_history = [{"role": "user", "content": request.message}]
         
         # Add system prompt based on conversation type
         system_prompt = _get_system_prompt(request.conversation_type, request.property_id)
@@ -97,25 +126,34 @@ async def send_message(
         if request.property_id:
             property_context = await _get_property_context(request.property_id, db)
         
+        # Get user preferences (skip in demo mode)
+        user_preferences = None
+        if settings.ENABLE_AUTHENTICATION:
+            user_preferences = await _get_user_preferences(current_user.id, db)
+        
         # Generate AI response
         ai_response, sources = await get_llm_service().generate_response(
             conversation_history=conversation_history,
             system_prompt=system_prompt,
             property_context=property_context,
-            user_preferences=await _get_user_preferences(current_user.id, db)
+            user_preferences=user_preferences
         )
         
-        # Save AI response
-        assistant_message = models.Message(
-            conversation_id=conversation.id,
-            role="assistant",
-            content=ai_response,
-            meta_data={"sources": sources} if sources else {}
-        )
-        db.add(assistant_message)
-        
-        # Update conversation
-        conversation.updated_at = assistant_message.created_at
+        # Save AI response to database (only if authentication is enabled)
+        if settings.ENABLE_AUTHENTICATION:
+            # Save AI response (convert Decimal objects to float for JSON serialization)
+            clean_sources = _convert_decimals_to_float(sources) if sources else None
+            assistant_message = models.Message(
+                conversation_id=conversation.id,
+                role="assistant",
+                content=ai_response,
+                meta_data={"sources": clean_sources} if clean_sources else {}
+            )
+            db.add(assistant_message)
+            
+            # Update conversation
+            conversation.updated_at = assistant_message.created_at
+            db.commit()
         
         # Generate suggestions
         suggestions = await _generate_suggestions(
@@ -124,16 +162,15 @@ async def send_message(
             property_context
         )
         
-        db.commit()
-        
         return schemas.ChatResponse(
-            conversation_id=str(conversation.id),
+            conversation_id=conversation_id,
             response=ai_response,
             sources=sources,
             suggestions=suggestions,
             metadata={
                 "conversation_type": request.conversation_type,
-                "property_id": request.property_id
+                "property_id": request.property_id,
+                "demo_mode": not settings.ENABLE_AUTHENTICATION
             }
         )
         
@@ -265,21 +302,45 @@ async def _get_property_context(property_id: str, db: Session) -> Optional[dict]
         import json
         return json.loads(cached_context)
     
-    # TODO: Fetch from Snowflake/PostgreSQL
-    # For now, return mock data
-    context = {
-        "property_id": property_id,
-        "acreage": 500,
-        "soil_quality": "High",
-        "current_use": "Pasture",
-        "location": {"county": "Travis", "state": "TX"}
-    }
-    
-    # Cache for future use
-    import json
-    await cache.set(cache_key, json.dumps(context), ttl=3600)
-    
-    return context
+    # Fetch from Snowflake database
+    try:
+        from data_connectors.snowflake_connector import SnowflakeConnector
+        snowflake_connector = SnowflakeConnector()
+        
+        # Get property boundaries and basic info
+        property_data = await snowflake_connector.get_property_boundaries(property_id)
+        if not property_data:
+            return None
+        
+        # Build context from real data using correct column names
+        context = {
+            "property_id": property_id,
+            "parcel_id": property_data.get("PARCEL_ID"),
+            "address": property_data.get("ADDRESS"),
+            "city": property_data.get("CITY"),
+            "state": property_data.get("STATE_CODE"),
+            "county": property_data.get("COUNTY_ID"),
+            "zip_code": property_data.get("ZIP_CODE"),
+            "acreage": property_data.get("ACRES"),
+            "total_value": property_data.get("TOTAL_VALUE"),
+            "land_value": property_data.get("LAND_VALUE"),
+            "improvement_value": property_data.get("IMPROVEMENT_VALUE"),
+            "owner_name": property_data.get("OWNER_NAME"),
+            "use_code": property_data.get("USECODE"),
+            "use_description": property_data.get("USEDESC"),
+            "zoning": property_data.get("ZONING"),
+            "zoning_description": property_data.get("ZONING_DESCRIPTION")
+        }
+        
+        # Cache for future use
+        import json
+        await cache.set(cache_key, json.dumps(context), ttl=3600)
+        
+        return context
+        
+    except Exception as e:
+        logger.error(f"Error getting property context for {property_id}: {str(e)}", exc_info=True)
+        return None
 
 
 async def _get_user_preferences(user_id: str, db: Session) -> Optional[dict]:

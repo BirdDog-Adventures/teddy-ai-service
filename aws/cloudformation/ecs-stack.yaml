@@ -1,0 +1,329 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECS Cluster and Service for Teddy AI Service'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Name of the project
+    Default: teddy-ai
+  
+  Environment:
+    Type: String
+    Description: Environment name
+    AllowedValues: [dev, stage, prod]
+    Default: dev
+  
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where resources will be created
+  
+  SubnetIds:
+    Type: CommaDelimitedList
+    Description: Subnet IDs for ECS tasks
+  
+  ImageUri:
+    Type: String
+    Description: Docker image URI from ECR
+  
+  TaskCpu:
+    Type: Number
+    Description: CPU units for the task (1024 = 1 vCPU)
+    Default: 1024
+  
+  TaskMemory:
+    Type: Number
+    Description: Memory for the task in MB
+    Default: 2048
+  
+  ContainerPort:
+    Type: Number
+    Description: Port the container listens on
+    Default: 8000
+  
+  DesiredCount:
+    Type: Number
+    Description: Desired number of tasks
+    Default: 1
+  
+  MinCapacity:
+    Type: Number
+    Description: Minimum number of tasks for auto scaling
+    Default: 1
+  
+  MaxCapacity:
+    Type: Number
+    Description: Maximum number of tasks for auto scaling
+    Default: 5
+
+Resources:
+  # CloudWatch Log Group
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${Environment}-${ProjectName}'
+      RetentionInDays: 30
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${Environment}-${ProjectName}-cluster'
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-${ProjectName}-cluster'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ECS Task Definition
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${Environment}-${ProjectName}'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: !Ref TaskCpu
+      Memory: !Ref TaskMemory
+      ExecutionRoleArn: !ImportValue
+        Fn::Sub: '${Environment}-${ProjectName}-ecs-execution-role-arn'
+      TaskRoleArn: !ImportValue
+        Fn::Sub: '${Environment}-${ProjectName}-ecs-task-role-arn'
+      ContainerDefinitions:
+        - Name: !Sub '${Environment}-${ProjectName}'
+          Image: !Ref ImageUri
+          Essential: true
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Secrets:
+            - Name: DATABASE_URL
+              ValueFrom: !Sub
+                - '${SecretsArn}:DATABASE_URL::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: DATABASE_SCHEMA
+              ValueFrom: !Sub
+                - '${SecretsArn}:DATABASE_SCHEMA::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: REDIS_URL
+              ValueFrom: !Sub
+                - '${SecretsArn}:REDIS_URL::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: OPENAI_API_KEY
+              ValueFrom: !Sub
+                - '${SecretsArn}:OPENAI_API_KEY::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: ANTHROPIC_API_KEY
+              ValueFrom: !Sub
+                - '${SecretsArn}:ANTHROPIC_API_KEY::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: GOOGLE_API_KEY
+              ValueFrom: !Sub
+                - '${SecretsArn}:GOOGLE_API_KEY::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: SNOWFLAKE_ACCOUNT
+              ValueFrom: !Sub
+                - '${SecretsArn}:SNOWFLAKE_ACCOUNT::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: SNOWFLAKE_USER
+              ValueFrom: !Sub
+                - '${SecretsArn}:SNOWFLAKE_USER::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: SNOWFLAKE_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretsArn}:SNOWFLAKE_PASSWORD::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: SNOWFLAKE_DATABASE
+              ValueFrom: !Sub
+                - '${SecretsArn}:SNOWFLAKE_DATABASE::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: SNOWFLAKE_SCHEMA
+              ValueFrom: !Sub
+                - '${SecretsArn}:SNOWFLAKE_SCHEMA::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: SNOWFLAKE_WAREHOUSE
+              ValueFrom: !Sub
+                - '${SecretsArn}:SNOWFLAKE_WAREHOUSE::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: SNOWFLAKE_ROLE
+              ValueFrom: !Sub
+                - '${SecretsArn}:SNOWFLAKE_ROLE::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: SNOWFLAKE_PRIVATE_KEY_PATH
+              ValueFrom: !Sub
+                - '${SecretsArn}:SNOWFLAKE_PRIVATE_KEY_PATH::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: JWT_SECRET_KEY
+              ValueFrom: !Sub
+                - '${SecretsArn}:JWT_SECRET_KEY::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: JWT_ALGORITHM
+              ValueFrom: !Sub
+                - '${SecretsArn}:JWT_ALGORITHM::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: ENABLE_AUTHENTICATION
+              ValueFrom: !Sub
+                - '${SecretsArn}:ENABLE_AUTHENTICATION::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+            - Name: DEBUG
+              ValueFrom: !Sub
+                - '${SecretsArn}:DEBUG::'
+                - SecretsArn: !ImportValue
+                    Fn::Sub: '${Environment}-${ProjectName}-secrets-arn'
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: AWS_DEFAULT_REGION
+              Value: !Ref AWS::Region
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - !Sub 'curl -f http://localhost:${ContainerPort}/api/v1/health || exit 1'
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ECS Service
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub '${Environment}-${ProjectName}-service'
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !ImportValue
+              Fn::Sub: '${Environment}-${ProjectName}-ecs-sg-id'
+          Subnets: !Ref SubnetIds
+          AssignPublicIp: ENABLED
+      LoadBalancers:
+        - ContainerName: !Sub '${Environment}-${ProjectName}'
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !ImportValue
+            Fn::Sub: '${Environment}-${ProjectName}-tg-arn'
+      HealthCheckGracePeriodSeconds: 300
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-${ProjectName}-service'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Auto Scaling Target
+  AutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: !Ref MaxCapacity
+      MinCapacity: !Ref MinCapacity
+      ResourceId: !Sub 'service/${ECSCluster}/${ECSService.Name}'
+      RoleARN: !ImportValue
+        Fn::Sub: '${Environment}-${ProjectName}-autoscaling-role-arn'
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  # Auto Scaling Policy - CPU
+  AutoScalingPolicyCPU:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub '${Environment}-${ProjectName}-cpu-scaling'
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref AutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: 70.0
+        ScaleOutCooldown: 300
+        ScaleInCooldown: 300
+
+  # Auto Scaling Policy - Memory
+  AutoScalingPolicyMemory:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub '${Environment}-${ProjectName}-memory-scaling'
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref AutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageMemoryUtilization
+        TargetValue: 80.0
+        ScaleOutCooldown: 300
+        ScaleInCooldown: 300
+
+Outputs:
+  ClusterName:
+    Description: ECS Cluster Name
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub '${Environment}-${ProjectName}-cluster-name'
+  
+  ServiceName:
+    Description: ECS Service Name
+    Value: !GetAtt ECSService.Name
+    Export:
+      Name: !Sub '${Environment}-${ProjectName}-service-name'
+  
+  TaskDefinitionArn:
+    Description: Task Definition ARN
+    Value: !Ref TaskDefinition
+    Export:
+      Name: !Sub '${Environment}-${ProjectName}-task-definition-arn'
+  
+  LogGroupName:
+    Description: CloudWatch Log Group Name
+    Value: !Ref LogGroup
+    Export:
+      Name: !Sub '${Environment}-${ProjectName}-log-group-name'

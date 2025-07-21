@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 
-from api.core.dependencies import get_db, cache
+from api.core.dependencies import get_db, cache, get_optional_current_user
 from api.core.security import get_current_active_user
 from api.models import database as models
 from api.models import schemas
@@ -36,19 +36,22 @@ def get_search_service():
 @router.post("/properties", response_model=schemas.PropertySearchResponse)
 async def search_properties(
     request: schemas.PropertySearchRequest,
-    current_user: models.User = Depends(get_current_active_user),
+    current_user = Depends(get_optional_current_user()),
     db: Session = Depends(get_db)
 ):
     """Semantic search for properties"""
     try:
-        # Log search history
-        search_history = models.SearchHistory(
-            user_id=current_user.id,
-            search_type="property",
-            query=request.query,
-            filters=request.filters or {}
-        )
-        db.add(search_history)
+        from api.core.config import settings
+        
+        # Log search history (only if authentication is enabled)
+        if settings.ENABLE_AUTHENTICATION and current_user:
+            search_history = models.SearchHistory(
+                user_id=current_user.id,
+                search_type="property",
+                query=request.query,
+                filters=request.filters or {}
+            )
+            db.add(search_history)
         
         # Perform search
         results = await get_search_service().search_properties(
@@ -60,9 +63,10 @@ async def search_properties(
             offset=request.offset
         )
         
-        # Update search history with results count
-        search_history.results_count = len(results)
-        db.commit()
+        # Update search history with results count (only if authentication is enabled)
+        if settings.ENABLE_AUTHENTICATION and current_user:
+            search_history.results_count = len(results)
+            db.commit()
         
         return schemas.PropertySearchResponse(
             results=results,
@@ -81,29 +85,34 @@ async def search_properties(
 @router.post("/insights", response_model=schemas.BaseResponse)
 async def search_insights(
     request: schemas.InsightSearchRequest,
-    current_user: models.User = Depends(get_current_active_user),
+    current_user = Depends(get_optional_current_user()),
     db: Session = Depends(get_db)
 ):
     """Search for agricultural insights"""
     try:
-        # Log search history
-        search_history = models.SearchHistory(
-            user_id=current_user.id,
-            search_type="insight",
-            query=request.query,
-            filters={
-                "insight_types": request.insight_types,
-                "property_ids": request.property_ids,
-                "date_range": request.date_range
-            }
-        )
-        db.add(search_history)
+        from api.core.config import settings
+        
+        # Log search history (only if authentication is enabled)
+        if settings.ENABLE_AUTHENTICATION and current_user:
+            search_history = models.SearchHistory(
+                user_id=current_user.id,
+                search_type="insight",
+                query=request.query,
+                filters={
+                    "insight_types": request.insight_types,
+                    "property_ids": request.property_ids,
+                    "date_range": request.date_range
+                }
+            )
+            db.add(search_history)
         
         # TODO: Implement insight search
         results = []
         
-        search_history.results_count = len(results)
-        db.commit()
+        # Update search history with results count (only if authentication is enabled)
+        if settings.ENABLE_AUTHENTICATION and current_user:
+            search_history.results_count = len(results)
+            db.commit()
         
         return schemas.BaseResponse(
             success=True,
@@ -122,11 +131,13 @@ async def search_insights(
 async def get_search_suggestions(
     query: str,
     search_type: str = "property",
-    current_user: models.User = Depends(get_current_active_user),
+    current_user = Depends(get_optional_current_user()),
     db: Session = Depends(get_db)
 ):
     """Get search suggestions based on partial query"""
     try:
+        from api.core.config import settings
+        
         # TODO: Implement search suggestions
         suggestions = [
             f"{query} in Texas",

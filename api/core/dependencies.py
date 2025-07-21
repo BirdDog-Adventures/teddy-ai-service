@@ -12,18 +12,40 @@ from snowflake.connector.connection import SnowflakeConnection
 
 from api.core.config import settings
 
-# PostgreSQL Database Setup
-engine = create_engine(
-    settings.DATABASE_URL,
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    pool_pre_ping=True,
-)
+# Database Setup - Handle different database types
+def create_database_engine():
+    """Create database engine with appropriate parameters based on database type"""
+    database_url = settings.DATABASE_URL
+    
+    # Check if it's SQLite
+    if database_url.startswith('sqlite'):
+        # SQLite doesn't support pool_size and max_overflow
+        return create_engine(
+            database_url,
+            pool_pre_ping=True,
+        )
+    else:
+        # PostgreSQL and other databases
+        return create_engine(
+            database_url,
+            pool_size=settings.DATABASE_POOL_SIZE,
+            max_overflow=settings.DATABASE_MAX_OVERFLOW,
+            pool_pre_ping=True,
+        )
+
+engine = create_database_engine()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Redis Setup
-redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+# Redis Setup - Handle disabled Redis gracefully
+redis_client = None
+if settings.REDIS_URL and settings.REDIS_URL.strip():
+    try:
+        redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+        # Test connection
+        redis_client.ping()
+    except (redis.RedisError, Exception):
+        redis_client = None
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -35,8 +57,8 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-def get_redis() -> redis.Redis:
-    """Get Redis client"""
+def get_redis() -> Optional[redis.Redis]:
+    """Get Redis client (returns None if Redis is disabled)"""
     return redis_client
 
 
@@ -75,6 +97,10 @@ class RateLimiter:
     
     async def __call__(self, user_id: str) -> bool:
         """Check if user has exceeded rate limit"""
+        # If Redis is disabled, skip rate limiting
+        if not self.redis:
+            return True
+            
         key = f"rate_limit:{user_id}"
         
         try:
@@ -101,12 +127,14 @@ rate_limiter = RateLimiter()
 class Cache:
     """Cache dependency for storing temporary data"""
     
-    def __init__(self, redis_client: redis.Redis = redis_client):
+    def __init__(self, redis_client: Optional[redis.Redis] = redis_client):
         self.redis = redis_client
         self.default_ttl = settings.REDIS_CACHE_TTL
     
     async def get(self, key: str) -> Optional[str]:
         """Get value from cache"""
+        if not self.redis:
+            return None
         try:
             return self.redis.get(key)
         except redis.RedisError:
@@ -114,6 +142,8 @@ class Cache:
     
     async def set(self, key: str, value: str, ttl: Optional[int] = None) -> bool:
         """Set value in cache"""
+        if not self.redis:
+            return False
         try:
             ttl = ttl or self.default_ttl
             return self.redis.setex(key, ttl, value)
@@ -122,6 +152,8 @@ class Cache:
     
     async def delete(self, key: str) -> bool:
         """Delete value from cache"""
+        if not self.redis:
+            return False
         try:
             return bool(self.redis.delete(key))
         except redis.RedisError:
@@ -129,6 +161,8 @@ class Cache:
     
     async def exists(self, key: str) -> bool:
         """Check if key exists in cache"""
+        if not self.redis:
+            return False
         try:
             return bool(self.redis.exists(key))
         except redis.RedisError:
@@ -137,3 +171,25 @@ class Cache:
 
 # Create cache instance
 cache = Cache()
+
+
+def get_optional_current_user():
+    """
+    Optional authentication dependency that returns user if authentication is enabled,
+    otherwise returns mock demo user for development/demo mode
+    """
+    from api.core.security import get_current_user
+    
+    if settings.ENABLE_AUTHENTICATION:
+        # Return the actual dependency function for authentication
+        return get_current_user
+    else:
+        # Return a function that provides mock demo user
+        def demo_user():
+            return {
+                "id": "demo-user",
+                "email": "demo@example.com",
+                "role": "user",
+                "is_active": True
+            }
+        return demo_user

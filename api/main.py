@@ -69,24 +69,26 @@ if settings.ENABLE_METRICS:
 # Exception handlers
 @app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError):
+    error_response = ErrorResponse(
+        error=str(exc),
+        error_code="VALUE_ERROR"
+    )
     return JSONResponse(
         status_code=400,
-        content=ErrorResponse(
-            error=str(exc),
-            error_code="VALUE_ERROR"
-        ).model_dump()
+        content=error_response.model_dump(mode='json')
     )
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    error_response = ErrorResponse(
+        error="An internal error occurred",
+        error_code="INTERNAL_ERROR"
+    )
     return JSONResponse(
         status_code=500,
-        content=ErrorResponse(
-            error="An internal error occurred",
-            error_code="INTERNAL_ERROR"
-        ).model_dump()
+        content=error_response.model_dump(mode='json')
     )
 
 
@@ -124,6 +126,13 @@ async def health_check():
         version="1.0.0",
         services=services_status
     )
+
+
+# Additional health check endpoint for Docker health checks
+@app.get("/api/v1/health", response_model=HealthResponse)
+async def docker_health_check():
+    """Health check endpoint for Docker health checks"""
+    return await health_check()
 
 
 # Include API routers

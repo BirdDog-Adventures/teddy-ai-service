@@ -1,18 +1,22 @@
 """
 Recommendations endpoint for personalized property and optimization suggestions
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import logging
 
-from api.core.dependencies import get_db, cache
+from api.core.dependencies import get_db, cache, get_optional_current_user
 from api.core.security import get_current_active_user
 from api.models import database as models
 from api.models import schemas
+from services.crop_recommendation_service import CropRecommendationService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Initialize crop recommendation service
+crop_service = CropRecommendationService()
 
 
 @router.get("/properties/{user_id}", response_model=schemas.RecommendationResponse)
@@ -83,57 +87,192 @@ async def get_property_recommendations(
         )
 
 
-@router.get("/crops/{property_id}", response_model=schemas.BaseResponse)
+@router.get("/crops/{parcel_id}", response_model=schemas.BaseResponse)
 async def get_crop_recommendations(
-    property_id: str,
-    season: str = "spring",
-    current_user: models.User = Depends(get_current_active_user),
+    parcel_id: str,
+    county_id: Optional[str] = Query(None, description="County ID for regional analysis"),
+    state_code: Optional[str] = Query(None, description="State code for regional analysis"),
+    include_ai_analysis: bool = Query(False, description="Include AI-enhanced analysis"),
+    current_user = Depends(get_optional_current_user()),
     db: Session = Depends(get_db)
 ):
-    """Get crop recommendations for a specific property"""
+    """Get intelligent crop recommendations based on historical data and analysis"""
     try:
-        # TODO: Implement ML-based crop recommendations
-        recommendations = [
-            {
-                "crop": "Corn",
-                "suitability_score": 92,
-                "expected_yield": "180 bushels/acre",
-                "revenue_potential": "$900/acre",
-                "best_planting_time": "April 15 - May 15",
-                "considerations": ["Requires good drainage", "High nitrogen needs"]
-            },
-            {
-                "crop": "Soybeans",
-                "suitability_score": 88,
-                "expected_yield": "50 bushels/acre",
-                "revenue_potential": "$750/acre",
-                "best_planting_time": "May 1 - June 1",
-                "considerations": ["Good rotation crop", "Fixes nitrogen"]
-            }
-        ]
+        from api.core.config import settings
+        
+        # Generate crop recommendations using the service
+        recommendations = await crop_service.generate_crop_recommendations(
+            parcel_id=parcel_id,
+            county_id=county_id,
+            state_code=state_code
+        )
+        
+        if not recommendations:
+            return schemas.BaseResponse(
+                success=True,
+                message="No specific recommendations available for this parcel",
+                metadata={
+                    "parcel_id": parcel_id,
+                    "recommendations": [],
+                    "note": "Consider providing county_id and state_code for better recommendations"
+                }
+            )
+        
+        # Get AI-enhanced analysis if requested
+        response_data = {
+            "parcel_id": parcel_id,
+            "total_recommendations": len(recommendations),
+            "recommendations": [rec.__dict__ for rec in recommendations]
+        }
+        
+        if include_ai_analysis:
+            ai_enhanced = await crop_service.get_ai_enhanced_recommendations(
+                parcel_id=parcel_id,
+                recommendations=recommendations
+            )
+            response_data.update(ai_enhanced)
         
         return schemas.BaseResponse(
             success=True,
-            message=f"Generated {len(recommendations)} crop recommendations for {season} season",
-            metadata={"recommendations": recommendations}
+            message=f"Generated {len(recommendations)} intelligent crop recommendations",
+            metadata=response_data
         )
         
     except Exception as e:
-        logger.error(f"Error getting crop recommendations: {str(e)}", exc_info=True)
+        logger.error(f"Error getting crop recommendations for parcel {parcel_id}: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve crop recommendations"
         )
 
 
+@router.get("/crops/{parcel_id}/history", response_model=schemas.BaseResponse)
+async def get_crop_history(
+    parcel_id: str,
+    years: int = Query(5, description="Number of years of history to retrieve"),
+    current_user = Depends(get_optional_current_user()),
+    db: Session = Depends(get_db)
+):
+    """Get crop history for a specific parcel"""
+    try:
+        from api.core.config import settings
+        
+        # Get crop history
+        crop_history = await crop_service.get_crop_history_for_parcel(parcel_id, years)
+        
+        if not crop_history:
+            return schemas.BaseResponse(
+                success=True,
+                message="No crop history found for this parcel",
+                metadata={
+                    "parcel_id": parcel_id,
+                    "years_requested": years,
+                    "history": []
+                }
+            )
+        
+        # Analyze rotation patterns
+        rotation_analysis = crop_service.analyze_rotation_patterns(crop_history)
+        
+        # Format history data
+        history_data = []
+        for record in crop_history:
+            history_data.append({
+                "history_id": record.history_id,
+                "crop_year": record.crop_year,
+                "crop_type": record.crop_type,
+                "rotation_sequence": record.rotation_sequence,
+                "county_id": record.county_id,
+                "state_code": record.state_code,
+                "created_at": record.created_at.isoformat() if record.created_at else None
+            })
+        
+        return schemas.BaseResponse(
+            success=True,
+            message=f"Retrieved {len(crop_history)} crop history records",
+            metadata={
+                "parcel_id": parcel_id,
+                "years_requested": years,
+                "total_records": len(crop_history),
+                "history": history_data,
+                "rotation_analysis": rotation_analysis
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting crop history for parcel {parcel_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve crop history"
+        )
+
+
+@router.get("/crops/regional/{county_id}/{state_code}", response_model=schemas.BaseResponse)
+async def get_regional_crop_performance(
+    county_id: str,
+    state_code: str,
+    years: int = Query(3, description="Number of years for regional analysis"),
+    current_user = Depends(get_optional_current_user()),
+    db: Session = Depends(get_db)
+):
+    """Get regional crop performance data"""
+    try:
+        from api.core.config import settings
+        
+        # Get regional performance data
+        regional_data = await crop_service.get_regional_crop_performance(county_id, state_code, years)
+        
+        if not regional_data:
+            return schemas.BaseResponse(
+                success=True,
+                message="No regional crop data found",
+                metadata={
+                    "county_id": county_id,
+                    "state_code": state_code,
+                    "years_analyzed": years,
+                    "regional_data": {}
+                }
+            )
+        
+        # Calculate summary statistics
+        total_frequency = sum(data["frequency"] for data in regional_data.values())
+        most_popular_crop = max(regional_data.items(), key=lambda x: x[1]["frequency"])
+        
+        return schemas.BaseResponse(
+            success=True,
+            message=f"Retrieved regional crop performance for {county_id}, {state_code}",
+            metadata={
+                "county_id": county_id,
+                "state_code": state_code,
+                "years_analyzed": years,
+                "total_crop_instances": total_frequency,
+                "crop_types_found": len(regional_data),
+                "most_popular_crop": {
+                    "crop_type": most_popular_crop[0],
+                    "frequency": most_popular_crop[1]["frequency"]
+                },
+                "regional_data": regional_data
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting regional crop performance: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve regional crop performance"
+        )
+
+
 @router.get("/revenue/{property_id}", response_model=schemas.BaseResponse)
 async def get_revenue_optimization(
     property_id: str,
-    current_user: models.User = Depends(get_current_active_user),
+    current_user = Depends(get_optional_current_user()),
     db: Session = Depends(get_db)
 ):
     """Get revenue optimization recommendations for a property"""
     try:
+        from api.core.config import settings
+        
         # TODO: Implement revenue optimization analysis
         optimizations = [
             {
