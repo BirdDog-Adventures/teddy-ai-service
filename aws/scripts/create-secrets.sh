@@ -91,15 +91,16 @@ GOOGLE_API_KEY=$(prompt_for_secret "Google API Key (optional, will be hidden)" "
 echo -e "${BLUE}=== Snowflake Configuration ===${NC}"
 SNOWFLAKE_ACCOUNT=$(prompt_for_secret "Snowflake Account" "JJODRXK-FP74384")
 SNOWFLAKE_USER=$(prompt_for_secret "Snowflake User" "BIRDDOG_GEOVIEWER")
-SNOWFLAKE_PASSWORD=$(prompt_for_secret "Snowflake Password (will be hidden)")
+SNOWFLAKE_PASSWORD=$(prompt_for_secret "Snowflake Password (leave empty if using private key auth)" "")
 SNOWFLAKE_DATABASE=$(prompt_for_secret "Snowflake Database" "BIRDDOG_DATA")
 SNOWFLAKE_SCHEMA=$(prompt_for_secret "Snowflake Schema" "CURATED")
 SNOWFLAKE_WAREHOUSE=$(prompt_for_secret "Snowflake Warehouse" "BIRDDOG_WH")
 SNOWFLAKE_ROLE=$(prompt_for_secret "Snowflake Role" "DATAENGINEERINGADMIN")
+SNOWFLAKE_PRIVATE_KEY_PATH=$(prompt_for_secret "Snowflake Private Key Path" "/app/keys/rsa_key.p8")
 
 # JWT Configuration
 echo -e "${BLUE}=== JWT Configuration ===${NC}"
-JWT_SECRET_KEY=$(prompt_for_secret "JWT Secret Key (will be hidden)" "$(openssl rand -base64 32)")
+JWT_SECRET_KEY=$(prompt_for_secret "JWT Secret Key (will be hidden)" "$(openssl rand -base64 32 | tr -d '\n')")
 JWT_ALGORITHM=$(prompt_for_secret "JWT Algorithm" "HS256")
 
 # Application Configuration
@@ -125,6 +126,7 @@ APP_SECRETS=$(cat <<EOF
   "SNOWFLAKE_SCHEMA": "${SNOWFLAKE_SCHEMA}",
   "SNOWFLAKE_WAREHOUSE": "${SNOWFLAKE_WAREHOUSE}",
   "SNOWFLAKE_ROLE": "${SNOWFLAKE_ROLE}",
+  "SNOWFLAKE_PRIVATE_KEY_PATH": "${SNOWFLAKE_PRIVATE_KEY_PATH}",
   "JWT_SECRET_KEY": "${JWT_SECRET_KEY}",
   "JWT_ALGORITHM": "${JWT_ALGORITHM}",
   "ENABLE_AUTHENTICATION": "${ENABLE_AUTHENTICATION}",
