@@ -71,7 +71,7 @@ DB_PORT=$(prompt_for_secret "Database Port" "5432")
 DB_NAME=$(prompt_for_secret "Database Name" "teddy_ai")
 DB_USER=$(prompt_for_secret "Database User" "teddy_user")
 DB_PASSWORD=$(prompt_for_secret "Database Password (will be hidden)")
-DB_SCHEMA=$(prompt_for_secret "Database Schema" "teddy_ai")
+DB_SCHEMA=$(prompt_for_secret "Database Schema" "teddy-ai")
 
 # Redis Configuration
 echo -e "${BLUE}=== Redis Configuration ===${NC}"

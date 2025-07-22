@@ -76,6 +76,7 @@ class Settings(BaseSettings):
 
     # Database Configuration
     DATABASE_URL: str
+    DATABASE_SCHEMA: Optional[str] = None  # PostgreSQL schema name (e.g., 'teddy_ai')
     DATABASE_POOL_SIZE: int = 20
     DATABASE_MAX_OVERFLOW: int = 40
 

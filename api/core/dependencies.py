@@ -37,6 +37,10 @@ engine = create_database_engine()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# Configure schema for all models if specified
+if settings.DATABASE_SCHEMA:
+    Base.metadata.schema = settings.DATABASE_SCHEMA
+
 # Redis Setup - Handle disabled Redis gracefully
 redis_client = None
 if settings.REDIS_URL and settings.REDIS_URL.strip():

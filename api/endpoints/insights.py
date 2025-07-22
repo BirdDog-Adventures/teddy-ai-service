@@ -216,12 +216,12 @@ def _prepare_data_summary_for_llm(property_data: Dict[str, Any]) -> str:
     if "parcel_profile" in property_data:
         parcel = property_data["parcel_profile"]
         
-        # Safe formatting for monetary values
+        # Safe formatting for monetary values - convert Decimal to float
         total_value = parcel.get('TOTAL_VALUE')
-        total_value_str = f"${total_value:,}" if total_value is not None else 'N/A'
+        total_value_str = f"${float(total_value):,.0f}" if total_value is not None else 'N/A'
         
         land_value = parcel.get('LAND_VALUE')
-        land_value_str = f"${land_value:,}" if land_value is not None else 'N/A'
+        land_value_str = f"${float(land_value):,.0f}" if land_value is not None else 'N/A'
         
         summary_parts.append(f"""
 PROPERTY OVERVIEW:
@@ -308,9 +308,9 @@ LAND COVER ANALYSIS:
     if "section_180_estimates" in property_data:
         s180 = property_data["section_180_estimates"]
         
-        # Safe formatting for deduction amount
+        # Safe formatting for deduction amount - convert Decimal to float
         total_deduction = s180.get('TOTAL_DEDUCTION')
-        deduction_str = f"${total_deduction:,}" if total_deduction is not None else 'N/A'
+        deduction_str = f"${float(total_deduction):,.0f}" if total_deduction is not None else 'N/A'
         
         summary_parts.append(f"""
 SECTION 180 TAX DEDUCTION ESTIMATES:
@@ -371,11 +371,11 @@ def _calculate_property_score(property_data: Dict[str, Any]) -> float:
         if soil_data.get('FERTILITY_CLASS'):
             fertility = soil_data.get('FERTILITY_CLASS', '').lower()
             if 'high' in fertility or 'prime' in fertility:
-                score += 90
+                score += 90.0
             elif 'good' in fertility or 'moderate' in fertility:
-                score += 75
+                score += 75.0
             else:
-                score += 60
+                score += 60.0
             factors += 1
     
     # Agricultural capability factor
@@ -383,15 +383,17 @@ def _calculate_property_score(property_data: Dict[str, Any]) -> float:
         comp = property_data["comprehensive_analysis"]
         ag_percentage = comp.get('AGRICULTURAL_PERCENTAGE', 0)
         if ag_percentage:
-            score += min(ag_percentage, 100)
+            # Convert to float to handle Decimal types from Snowflake
+            ag_percentage_float = float(ag_percentage) if ag_percentage is not None else 0.0
+            score += min(ag_percentage_float, 100.0)
             factors += 1
     
     # Crop history factor (diversity and consistency)
     if "crop_history" in property_data and property_data["crop_history"]:
         crop_years = len(set(crop.get('CROP_YEAR') for crop in property_data["crop_history"]))
         crop_types = len(set(crop.get('CROP_TYPE') for crop in property_data["crop_history"]))
-        history_score = min((crop_years * 10) + (crop_types * 5), 100)
-        score += history_score
+        history_score = min((crop_years * 10) + (crop_types * 5), 100.0)
+        score += float(history_score)
         factors += 1
     
     # Climate factor
@@ -399,13 +401,15 @@ def _calculate_property_score(property_data: Dict[str, Any]) -> float:
         climate = property_data["climate_data"]
         precipitation = climate.get('ANNUAL_PRECIPITATION_INCHES', 0)
         if precipitation:
+            # Convert to float to handle Decimal types from Snowflake
+            precipitation_float = float(precipitation) if precipitation is not None else 0.0
             # Optimal precipitation range for most crops is 20-40 inches
-            if 20 <= precipitation <= 40:
-                score += 85
-            elif 15 <= precipitation <= 50:
-                score += 70
+            if 20 <= precipitation_float <= 40:
+                score += 85.0
+            elif 15 <= precipitation_float <= 50:
+                score += 70.0
             else:
-                score += 55
+                score += 55.0
             factors += 1
     
     return round(score / factors if factors > 0 else 50.0, 1)
